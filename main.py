@@ -140,10 +140,6 @@ async def get_montant(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         f"Montant : {cents/100:.2f} €\n\n"
         f"Lien à envoyer au client :\n{lien}\n\n"
         "Tu recevras une confirmation dès que le paiement est effectué.")
-    await ctx.bot.send_message(ADMIN_CHAT_ID,
-        f"🆕 Lien créé\nTeam Leader ou Agent : {nom}\nJoueur : {joueur}\n"
-        f"Montant : {cents/100:.2f} €\n"
-        f"Compte Telegram : {compte} ({agent_id})\nRéf : {pi['id']}")
     return ConversationHandler.END
 
 
