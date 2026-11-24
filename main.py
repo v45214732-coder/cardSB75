@@ -2,7 +2,7 @@ import os, json, asyncio, logging, sqlite3, datetime, re
 import httpx
 from fastapi import FastAPI, Request
 import uvicorn
-from telegram import Update
+from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import (Application, CommandHandler, MessageHandler,
                           ConversationHandler, ContextTypes, filters)
 
@@ -80,6 +80,15 @@ async def ziina_register_webhook():
 # ---------- Conversation Telegram ----------
 AGENT, JOUEUR, MONTANT = range(3)
 
+# Boutons affichés sous la zone de saisie
+BTN_RECOMMENCER = "🔄 Recommencer"
+BTN_ANNULER     = "❌ Annuler"
+F_RECOMMENCER = filters.Regex(r"(?i)^\W*recommencer$")
+F_ANNULER     = filters.Regex(r"(?i)^\W*annuler$")
+SAISIE = filters.TEXT & ~filters.COMMAND & ~F_RECOMMENCER & ~F_ANNULER
+CLAVIER_EN_COURS = ReplyKeyboardMarkup([[BTN_RECOMMENCER, BTN_ANNULER]], resize_keyboard=True)
+CLAVIER_FIN      = ReplyKeyboardMarkup([[BTN_RECOMMENCER]], resize_keyboard=True)
+
 
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not autorise(update.effective_user.id):
@@ -88,7 +97,8 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "transmets-le à l'administrateur.")
         return ConversationHandler.END
     ctx.user_data.clear()
-    await update.message.reply_text("Quel est ton nom d'agent ou TeamLeader ?")
+    await update.message.reply_text("Quel est ton nom de TeamLeader ou d'agent ?",
+                                    reply_markup=CLAVIER_EN_COURS)
     return AGENT
 
 
@@ -108,14 +118,14 @@ async def get_joueur(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Nom trop court, réessaie.")
         return JOUEUR
     ctx.user_data["joueur"] = joueur
-    await update.message.reply_text("Montant en euros ? (exemple : 150)")
+    await update.message.reply_text("Montant en euros ? (exemple : 100)")
     return MONTANT
 
 
 async def get_montant(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     txt = update.message.text.strip().replace(",", ".").replace("€", "").strip()
     if not re.fullmatch(r"\d+(\.\d{1,2})?", txt) or float(txt) <= 0:
-        await update.message.reply_text("Montant invalide. Exemple : 150")
+        await update.message.reply_text("Montant invalide. Exemple : 100")
         return MONTANT
     cents = round(float(txt) * 100)
     agent_id = update.effective_user.id
@@ -128,7 +138,8 @@ async def get_montant(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     except Exception:
         log.exception("Erreur Ziina")
         await update.message.reply_text(
-            "Erreur lors de la création du lien, réessaie plus tard.")
+            "Erreur lors de la création du lien, réessaie plus tard.",
+            reply_markup=CLAVIER_FIN)
         return ConversationHandler.END
     lien = pi["redirect_url"]
     with db() as con:
@@ -139,16 +150,15 @@ async def get_montant(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         f"✅ Lien créé\n\nTeam Leader ou Agent : {nom}\nJoueur : {joueur}\n"
         f"Montant : {cents/100:.2f} €\n\n"
         f"Lien à envoyer au client :\n{lien}\n\n"
-        "Tu recevras une confirmation dès que le paiement est effectué.")
-    await ctx.bot.send_message(ADMIN_CHAT_ID,
-        f"🆕 Lien créé\nTeam Leader ou Agent : {nom}\nJoueur : {joueur}\n"
-        f"Montant : {cents/100:.2f} €\n"
-        f"Compte Telegram : {compte} ({agent_id})\nRéf : {pi['id']}")
+        "Tu recevras une confirmation dès que le paiement est effectué.",
+        reply_markup=CLAVIER_FIN)
     return ConversationHandler.END
 
 
 async def cancel(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Annulé. Tape /start pour recommencer.")
+    await update.message.reply_text(
+        "Annulé. Appuie sur « Recommencer » pour créer un nouveau lien.",
+        reply_markup=CLAVIER_FIN)
     return ConversationHandler.END
 
 
@@ -199,13 +209,17 @@ async def recap(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 def build_app():
     app = Application.builder().token(BOT_TOKEN).build()
     conv = ConversationHandler(
-        entry_points=[CommandHandler("start", start), CommandHandler("vente", start)],
-        states={AGENT:   [MessageHandler(filters.TEXT & ~filters.COMMAND, get_agent)],
-                JOUEUR:  [MessageHandler(filters.TEXT & ~filters.COMMAND, get_joueur)],
-                MONTANT: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_montant)]},
-        fallbacks=[CommandHandler("annuler", cancel)],
+        entry_points=[CommandHandler("start", start), CommandHandler("vente", start),
+                      MessageHandler(F_RECOMMENCER, start)],
+        states={AGENT:   [MessageHandler(SAISIE, get_agent)],
+                JOUEUR:  [MessageHandler(SAISIE, get_joueur)],
+                MONTANT: [MessageHandler(SAISIE, get_montant)]},
+        fallbacks=[CommandHandler("annuler", cancel), MessageHandler(F_ANNULER, cancel)],
         allow_reentry=True)   # /start relance le parcours même s'il était en cours
     app.add_handler(conv)
+    # « Annuler » appuyé alors qu'aucun parcours n'est en cours
+    app.add_handler(MessageHandler(F_ANNULER, cancel))
+    app.add_handler(CommandHandler("annuler", cancel))
     app.add_handler(CommandHandler("mesventes", mes_ventes))
     app.add_handler(CommandHandler("recap", recap))
     return app
@@ -283,3 +297,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+  
