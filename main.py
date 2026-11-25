@@ -97,7 +97,7 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "transmets-le à l'administrateur.")
         return ConversationHandler.END
     ctx.user_data.clear()
-    await update.message.reply_text("Quel est ton nom de TeamLeader ou d'agent ?",
+    await update.message.reply_text("👋 Nouvelle vente (paiement carte)\nQuel est ton nom TeamLeader ? ou d'agent",
                                     reply_markup=CLAVIER_EN_COURS)
     return AGENT
 
@@ -297,4 +297,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-  
